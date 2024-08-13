@@ -1,0 +1,672 @@
+---
+title: "#CN_voisines\nÉtude des différences entre les communes fusionnantes et leurs voisines (2012-1er janvier 2024)"
+author: "G. Bideau"
+date: '`r format(Sys.time(), "%d %B %Y %X")`' # %X pour rajouter l'heure
+# bibliography: biblio/biblio.bib
+link_citations: true
+output:
+     html_document:
+       toc: true
+       theme: united
+       css : css/styles.css
+editor_options: 
+  chunk_output_type: console
+---
+```{r Setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, # Afficher ou non le code R dans le document
+                      eval	= TRUE, #	Exécuter ou non le code R à la compilation
+                      include	= TRUE, #	Inclure ou non le code R et ses résultats dans le document
+                      # results	“hide”/“asis”/“markup”/“hold”	Type de résultats renvoyés par le bloc de code
+                      warning = FALSE, # Afficher ou non les avertissements générés par le bloc
+                      message = FALSE,  # Afficher ou non les messages générés par le bloc
+                      cache=TRUE) # Utiliser le cache pour accélerer les knits
+
+# Librairies utilisées
+library(sf)
+library(cartography)
+library(mapsf)
+library(corrplot)
+library(cowplot)
+library(MTA)
+library(readxl)
+library(ggplot2)
+library(FactoMineR) 
+library(factoextra)
+library(cluster)
+library(stringr)
+library(reshape)
+library(flows)
+library(sp)
+library(knitr)
+library(condformat)
+# library(dplyr)
+library(questionr)
+library(spdep) # Pour les matrices de contiguïté
+library(rgeoda) # Pour les matrices de contiguïté
+
+```
+
+
+
+
+
+```{r Librairies, echo=FALSE}
+# Librairies utilisées
+library(sf)
+library(cartography)
+library(mapsf)
+library(corrplot)
+library(cowplot)
+library(MTA)
+library(readxl)
+library(ggplot2)
+library(FactoMineR) 
+library(factoextra)
+library(cluster)
+library(reshape)
+library(reshape2)
+library(flows)
+# NB : Pour le package flows, la version la plus récente est disponible ici :
+# remotes::install_github("rCarto/flows") # ou # install.packages("mapsf")
+# Pour obtenir une version plus ancienne (celle utilisée ici) : https://cran.r-project.org/src/contrib/Archive/flows/
+# install.packages("packages/flows_1.1.1.tar.gz", repos=NULL, type="source")
+library(sp)
+library(knitr)
+library(condformat) # https://cran.r-project.org/web/packages/condformat/vignettes/introduction.html
+library(units)
+library(stringr)
+# library(dplyr)
+library(questionr)
+library(spdep) # Pour les matrices de contiguïté
+library(rgeoda) # Pour les matrices de contiguïté
+
+# Liste pour installer les packages si besoin :
+# sf cartography mapsf readxl foreign dplyr flextable knitr stringr units condformat forcats ggplot2 rstatix questionr corrplot gtsummary broom GGally effects forestmodel ggeffects labelled cowplot spdep rgeoda
+
+```
+
+# Présentation du document
+
+NB : Ce script est un document de travail.
+
+Il étudie les communes nouvelles en se focalisant sur les différences entre les communes fusionnantes et leurs voisines.
+
+Il est mis à disposition dans une logique de science ouverte.
+
+Ce travail s'inscrit dans le cadre d'une étude plus générale sur les communes nouvelles :
+
+https://cv.hal.science/gabriel-bideau
+
+Licence CC-BY-NC-SA.
+
+Il est possible d'accéder au code de ce Markdown ici : https://gbideau.github.io/CN_etude_voisines/etude_voisines.Rmd
+
+Les données utilisées pour jouer le code sont regroupées ici :
+https://gbideau.github.io/CN_data/CN_data.zip
+
+Ne pas hésiter à contacter l'auteur (gabriel.bideau@gmail.com) pour toute question.
+
+# Objectifs
+
+Regarder la différence entre une commune et ses voisines. Catégoriser en fonction des communes fusionnantes, des autres etc. : réflexion à l'aide d'une boucle pour voir des écarts entre les communes voisines.
+Sur une variable donnée (taux de chômage, taux d'endettement etc) et pour chaque commune ayant fusionné :
+    • quelle est la moyenne des différences entre cette commune et chacune de ces communes limitrophes avec lesquelles elle n'a pas fusionné ;
+    • quelle est la moyenne des différences entre cette commune et chacune des communes limitrophes (ou non ?) avec lesquelles elle a fusionné.
+
+# Préparation des données
+## Choix des variables
+
+```{r choix_data}
+
+
+variables_budg <- c("dgf_prct", "charge_prct", "perso_prct", "depinv_prct", "equip_prct", "dette_prct")
+
+selecVar_elect_2012 <- c("PR2012_T1_Abst_prct_insc", "PR2012_T1_prct_insc_LE.PEN", "PR2012_T1_prct_insc_SARKOZY", "PR2012_T1_prct_insc_MÉLENCHON", "PR2012_T1_prct_insc_BAYROU", "PR2012_T1_prct_insc_HOLLANDE")
+selecVar_elect_2017 <- c("PR2017_T1_Abst_prct_insc", "PR2017_T1_prct_insc_LE.PEN", "PR2017_T1_prct_insc_FILLON", "PR2017_T1_prct_insc_MÉLENCHON", "PR2017_T1_prct_insc_MACRON", "PR2017_T1_prct_insc_HAMON")
+selecVar_elect_2022 <- c("PR2022_T1_Abst_prct_insc", "PR2022_T1_prct_insc_LE.PEN", "PR2022_T1_prct_insc_MACRON", "PR2022_T1_prct_insc_MÉLENCHON", "PR2022_T1_prct_insc_ZEMMOUR")
+
+
+liste_variables <- list("P09_CHOM1564_RT", "C09_ACTOCC_OUT_RT", "P11_FoyFisc_Imp_RT", "C09_ACT1564_Agr_RT", "superficie", "P09_POP0014Y_RT", "P09_POP1529Y_RT", "P09_POP6074Y_RT",
+                        selecVar_elect_2012, selecVar_elect_2017, selecVar_elect_2022,
+                        variables_budg,
+                        c("P09_CHOM1564_RT", "C09_ACTOCC_OUT_RT", "C09_ACT1564_Agr_RT"))
+
+
+liste_variables <- list("P09_CHOM1564_RT", "C09_ACTOCC_OUT_RT", "P11_FoyFisc_Imp_RT", "C09_ACT1564_Agr_RT", "superficie", "P09_POP0014Y_RT", "P09_POP1529Y_RT", "P09_POP6074Y_RT", "P09_POP",
+                        selecVar_elect_2012, selecVar_elect_2017, selecVar_elect_2022,
+                        "PR2022_T1_Abst_prct_insc", "PR2022_T1_prct_insc_LE.PEN", "PR2022_T1_prct_insc_MACRON", "PR2022_T1_prct_insc_MÉLENCHON", "PR2022_T1_prct_insc_ZEMMOUR",
+                        variables_budg,
+                        "dgf_prct", "charge_prct", "perso_prct", "depinv_prct", "equip_prct", "dette_prct",
+                        c("P09_CHOM1564_RT", "C09_ACTOCC_OUT_RT", "C09_ACT1564_Agr_RT"))
+
+# Si on veut étudier les variables une par une, pas par blocs
+liste_variables_uniques <- unique(unlist(liste_variables))
+
+# En excluant les variables politiques (qui ne sont traitées qu'en listes)
+liste_variables_uniques_sans_polit <- liste_variables_uniques[-which(str_detect(liste_variables_uniques, "PR20") == TRUE)]
+
+```
+
+
+
+## Import des données
+
+```{r travail_moyennes_voisines_import_data}
+load("data/refdata.Rdata")
+
+load("data/refdata_budgets_2011-2022.Rdata")
+
+dep <- st_read("data/geom.gpkg", layer = "dep", quiet = TRUE)
+
+geom2011 <- st_read("data/geom.gpkg", layer = "geom2011", quiet = TRUE) 
+# geomfus2011 <- st_read("data/geom.gpkg", layer = "geomfus2011", quiet = TRUE)
+
+datafus2011 <- subset(df2011, COM_NOUV == "OUI")
+
+
+# Import des données électorales 2012 et 2022 aux géométries auxquelles elles sont publiées
+noms_scrutins_presid <- c("PR2012_T1")
+for (nom_scrutin in noms_scrutins_presid) {
+scrutin <- read.table(paste0("data/elections/", nom_scrutin, ".csv"), sep="\t", colClasses = "character", head = TRUE, stringsAsFactors = TRUE) # Pour connaître la longueur du tableau
+scrutin <- read.table(paste0("data/elections/", nom_scrutin, ".csv"), sep="\t", colClasses = c(rep("character", 2), rep("numeric", length(scrutin) -2)), head = TRUE, stringsAsFactors = TRUE, dec =",")
+assign(nom_scrutin, scrutin)}
+
+# Import des données électorales compilées
+noms_scrutins_presid_df2011 <- c("PR2017_T1", "PR2022_T1")
+# Import données concernant les communes fusionnantes à partir des bureaux de vote
+for (nom_scrutin in noms_scrutins_presid_df2011) {
+  scrutin <- read.table(paste0("data/elections/", nom_scrutin, "_geom2011.csv"),
+                        sep="\t", colClasses = "character", head = TRUE, stringsAsFactors = TRUE)
+  # On refait l'import maintenant qu'on connaît la longueur du tableau, en spécifiant le type de données
+  scrutin <- read.table(paste0("data/elections/", nom_scrutin, "_geom2011.csv"), sep="\t", colClasses = c(rep("character", 13), rep("numeric", length(scrutin) -13)), head = TRUE, stringsAsFactors = TRUE, dec =",")
+  assign(paste0("df2011_", nom_scrutin), scrutin)}
+rm(scrutin, nom_scrutin)
+
+colnames(PR2012_T1) <- paste0("PR2012_T1_", colnames(PR2012_T1))
+colnames(df2011_PR2017_T1)[14:ncol(df2011_PR2017_T1)] <- paste0("PR2017_T1_", colnames(df2011_PR2017_T1)[14:ncol(df2011_PR2017_T1)])
+colnames(df2011_PR2022_T1)[14:ncol(df2011_PR2022_T1)] <- paste0("PR2022_T1_", colnames(df2011_PR2022_T1)[14:ncol(df2011_PR2022_T1)])
+```
+
+## Jonction des données
+```{r travail_moyennes_voisines_jonction_data}
+test_geom <- merge(geom2011, df2011, by = "CODGEO")
+
+colnames(test_geom)
+test_geom <- merge(test_geom, PR2012_T1, by.x = "CODGEO", by.y = "PR2012_T1_CODGEO", all.x = TRUE)
+test_geom <- merge(test_geom, df2011_PR2017_T1, by = "CODGEO", all.x = TRUE)
+test_geom <- merge(test_geom, df2011_PR2022_T1, by = "CODGEO", all.x = TRUE)
+test_geom$P09_POP <- as.numeric(test_geom$P09_POP)
+```
+
+
+## Préparations pour graphiques
+
+```{r elements pour graphiques}
+CategZAU <- c("Unité urbaine\nd'un grand pôle", "Couronne d'un\ngrand pôle", " Multipolarisée des\ngrandes aires\nurbaines", "Unité urbaine\nd'un pôle moyen", "Couronne d'un\npôle moyen", "Unité urbaine\nd'un petit pôle", "Couronne d'un\npetit pôle", "Autre commune\nmultipolarisée", "Commune isolée\nhors influence\ndes pôles")
+
+```
+
+
+
+# Analyse distance statistique en comparant les voisines
+
+## Choix du type de voisinage
+
+Les communes, lorsqu'elles fusionnent, n'ont en fait qu'un nombre de choix limité. En effet, la création d'une commune nouvelle n'est possible que pour un ensemble continu (et sans enclave), c'est-à-dire que les communes ne peuvent fusionner, cela paraît logique, qu'avec leurs voisines. Il est donc utile d'intégrer la question de la contiguïté pour déterminer si les communes choisissent, parmi leurs voisines, des communes plutôt similaires ou différentes. Au moment du codage de ces éléments, on choisit de considérer des communes contigües à partir du moment où elles se touchent par un point (soit le voisinage « Reine » ou « Queen », par analogie avec le jeu d'échecs) puisque le faite de partager un segment de frontière (voisinage « Tour » ou « Rook ») n'est pas nécessaire. Cette différence est faible dans le cas des communes françaises mais pas tout à fait nulle. Ainsi, dans la carte suivante sur les communes du Maine-et-Loire, on a rajouté en rouge les contigüités qui n'existent que lorsqu'on prend en compte le modèle de la Reine, ce qui n'est pas inexistant (les liens bleus étant ceux des voisinages « Tour », qui existent uniquement en cas de voisinage « Reine » (Bellefon, Loonis et Le Gleut 2018).
+
+```{r choix du type de voisinage}
+library(spdep)
+
+test_geom_carte <- merge(geom2011, df2011[, c("CODGEO", "CODE_DEPT", "COM_NOUV", "P09_POP", "LIBGEO")], by = "CODGEO")
+test_geom_carte <- subset (test_geom_carte, CODE_DEPT == "49" )
+
+test_queen <- poly2nb(test_geom_carte, queen = TRUE)
+test_rook <- poly2nb(test_geom_carte, queen = FALSE)
+
+# On change de type d'objet pour faciliter les représentations
+test_geom_carte <- as(test_geom_carte, "Spatial")
+
+# Représentation graphique des deux manières de calculer les voisinages dans le cas du département du Maine-et-Loire
+plot(test_geom_carte, border="lightgray", main = "Le voisinage des communes\ndans le département du Maine-et-Loire (49)",
+     cex.main=1, # taille titre
+     font.main=1, # type (1 : normal, 2 : gras)
+     )
+plot(test_queen, coordinates(test_geom_carte),add=TRUE,col="red")
+plot(test_rook, coordinates(test_geom_carte),add=TRUE,col="blue")
+legend(title = "Type de voisinage", x="bottomright", legend=c("« Tour »","Uniquement « Reine »"), col=c("blue","red"),
+       lty=1, # type de figuré dans la légende
+       cex=0.7, # taille légende
+       box.lty=0, # supprime bordure
+       bg=NA # Pas de couleur en arrière-plan de la légende
+       )
+```
+
+## Analyse
+
+Une fois cette matrice de voisinage définie, il n'est pas aisé de sélectionner la mesure qui permettra de rendre compte des différences entre communes voisines.
+Une première solution est d'observer la distance statistique entre une commune fusionnante donnée et ses communes limitrophes. la distance statistique est une mesure synthétisant la proximité de valeurs, dans notre cas principalement des pourcentages. Pour calculer cette distance statistique, la métrique euclidienne est ici utilisée car ce choix est souvent fait dans des sujets potentiellement destinés à des acteurs publics, du fait de sa facilité de lecture (c'est par exemple le choix fait au sein du programme Espon – European Observation Network for Territorial Development and Cohesion). Il faut noter qu'on ne peut, en revanche, pas déduire de cette distance statistique que telle ou telle commune serait plus favorisée qu'une autre : une distance statistique importante n'indique pas si la commune de référence est favorisée ou non du point de vue de la variable étudiée ; elle n'indique d'ailleurs pas si cette différence est positive ou négative, elle indique simplement l'éloignement des variables. Cette distance statistique peut être calculée pour une variable donnée (par exemple la superficie) ou pour un ensemble de variables (par exemple différentes variables budgétaires.
+On calcule donc, d'un côté, la moyenne des distances statistiques entre une commune fusionnante donnée et ses voisines appartenant à la même commune voisine (valeur (A) dans la Table n°3) et d'un autre côté la moyenne des distances statistiques entre une commune fusionnante donnée et les voisines avec lesquelles elle ne fusionne pas (B). La différence entre ces deux valeurs (B-A) nous renseigne alors sur la plus grande proximité de la commune donnée, soit avec les voisines avec lesquelles elle fusionne, soit avec les voisines avec lesquelles elle ne fusionne pas. Quand cette différence (B-A) est positive, la commune fusionnante est statistiquement plus proche des communes avec lesquelles elle a fusionné que des autres communes voisines avec lesquelles elle n’a pas fusionné. En revanche, quand la différence est négative, cela veut dire que la distance statistique entre communes ayant fusionné entre elles est plus importante que la distance statistique avec ses communes voisines. Les résultats seront présentés dans la section 2.2.
+
+```{r analyse_et_resultats}
+# Si on part du package rgeoda
+queen_w <- queen_weights(test_geom, order=1, include_lower_order = FALSE, precision_threshold = 0)
+
+
+# On crée le vecteur qui va abriter les résultats pour l'ensemble des variables
+tableau_synth <- data.frame()
+
+class(liste_variables)
+variables_a_etudier <- liste_variables[3]
+class(variables_a_etudier)
+
+for (variables_a_etudier in liste_variables) {
+
+variables_a_etudier <-unlist(variables_a_etudier)
+
+test_data <- test_geom[, c("CODGEO", "CODGEO_new", "LIBGEO", "LIBGEO_new", "COM_NOUV", variables_a_etudier)]
+st_geometry(test_data) <- NULL
+
+test_data_Cfus <- subset(test_data, test_data$COM_NOUV == "OUI")
+
+resultats <- data.frame() # Pour accueillir les résultats
+CODGEO_com<- test_data_Cfus$CODGEO[10] # Pour tests
+
+for (CODGEO_com in test_data_Cfus$CODGEO) { # Pour chaque commune ayant fusionné
+  # On identifie la commune
+  numcom <- which(test_data$CODGEO==CODGEO_com)
+  CODGEO_new_com <- test_data$CODGEO_new[numcom]
+
+  # On liste les voisines, par l'identifiant de leur ligne
+  numvoisines <- get_neighbors(queen_w, idx = numcom)
+  # CODGEO_voisines <- test_data$CODGEO[numvoisines]
+  nbr_voisines <- length(numvoisines)
+  # num_voisine <- numvoisines[2]
+  # test_data$CODGEO[numvoisines]
+  # On sélectionne uniquement les communes limitrophes
+  test_data_subset <- test_data[numvoisines,]
+  # On renseigne, dans un nouveau champs, si ces communes appartiennent à la même commune nouvelle ou non
+  test_data_subset$lien <- ifelse(test_data_subset$CODGEO_new == CODGEO_new_com,# Si le CODGEO_new de la commune est le même que celui de la commune fusionnante qu'on étudie
+                                  "meme_CN", # Si oui, on indique que c'est la même commune
+                                  "pas_meme_CN" # Si non, on l'indique
+                                  )
+  result_dist <- c() # Pour archiver les résultats de distance
+
+  CODGEO_voisine <- test_data_subset$CODGEO[2]
+  
+  for (CODGEO_voisine in test_data_subset$CODGEO ) { # Pour chaque commune voisine
+    tmp <- subset(test_data, test_data$CODGEO == CODGEO_voisine |
+                    test_data$CODGEO == CODGEO_com)
+    dist <- dist(tmp[, variables_a_etudier], method = "euclidian")
+    result_dist <- c(result_dist, dist)
+  } # Fin boucle calcul distance avec chacune des voisines
+  
+  test_data_subset$dist <- result_dist
+  
+  # On fait deux tableaux différents pour être certains que les moyennes ne se mélangent pas si les vecteurs n'ont pas le même ordre
+  test_data_subset_meme_CN <- subset(test_data_subset, lien == "meme_CN")
+  nbr_voisines_fus <- nrow(test_data_subset_meme_CN) # On compte le nombre de voisines appartenant à la même CN
+  test_data_subset_pas_meme_CN <- subset(test_data_subset, lien == "pas_meme_CN")
+  nbr_voisines_Nfus <- nrow(test_data_subset_pas_meme_CN) # On compte le nombre d'autres voisines
+  
+  com_etud <- c(CODGEO_com, nbr_voisines, nbr_voisines_fus, nbr_voisines_Nfus, mean(test_data_subset_meme_CN$dist), mean(test_data_subset_pas_meme_CN$dist))
+  
+  resultats <- rbind(resultats, com_etud, stringsAsFactors = FALSE)
+} # Fin boucle pour une commune
+
+# NB : Pourrait valoir le coup de standardiser les données, mais à voir à quel moment...
+
+
+colnames(resultats) <- c("CODGEO", "Nombre de voisines", "Nombre de voisines avec lesquelles la commune a fusionné", "Nombre de voisines avec lesquelles la commune n'a pas fusionné", "Moyenne de la distance euclidienne avec les communes avec lesquelles la commune a fusionné", "Moyenne de la distance euclidienne avec les communes avec lesquelles la commune n'a pas fusionné")
+
+# assign(paste0("Compar_moy_", variable), results)
+
+
+# On passe les variables en numérique
+resultats[2:ncol(resultats)] <- apply(resultats[2:ncol(resultats)], 2, as.numeric)
+
+summary(resultats)
+
+# On crée une variable indiquant la différence
+resultats$Différence <- resultats$`Moyenne de la distance euclidienne avec les communes avec lesquelles la commune n'a pas fusionné` - resultats$`Moyenne de la distance euclidienne avec les communes avec lesquelles la commune a fusionné`
+
+
+result_variable <- c(paste(variables_a_etudier, collapse = "_"), mean(resultats[,5], na.rm = TRUE), mean(resultats[,6], na.rm = TRUE))
+
+tableau_synth <- rbind(tableau_synth, result_variable, stringsAsFactors = FALSE)
+
+
+pr_carto <- merge(geom2011, resultats, by = "CODGEO")
+pr_carto <- merge(pr_carto, df2011[, c("CODGEO", "REG")], by = "CODGEO")
+# pr_carto <- subset(pr_carto, REG == "23" | REG == "25"| REG == "53"| REG == "52") # Normandies, Bretagne, Pays-de-la-Loire
+pr_carto <- subset(pr_carto, REG == "23"| REG == "25") # Normandies
+
+# Carte distance euclidienne communes fusionnant ensemble
+# choroLayer(x = pr_carto , var = "Moyenne de la distance euclidienne avec les communes avec lesquelles la commune a fusionné",
+#            col = carto.pal(pal1 = "blue.pal", n1 = 4), method = "quantile", nclass = 4,
+#            legend.values.rnd = 2, legend.pos = "topleft", 
+#            legend.title.txt = paste0("Moyenne de la distance euclidienne\nentre les communes fusionnant ensemble\n", result_variable[1]),
+#            legend.title.cex = 1, legend.values.cex = 0.8)
+# layoutLayer(
+#   # title = "La moyenne de la distance euclidienne avec les communes fusionnant entre elles",
+#   #coltitle = "black", 
+#   sources = "Source : INSEE, 2024", scale = NULL,
+#   author = "Auteur : G. Bideau.", frame ="", col = NA)
+# plot(dep$geom, col = NA, lwd = 1, add = TRUE)
+
+# Carte distance euclidienne communes ne fusionnant pas ensemble
+# choroLayer(x = pr_carto , var = "Moyenne de la distance euclidienne avec les communes avec lesquelles la commune n'a pas fusionné",
+#            col = carto.pal(pal1 = "blue.pal", n1 = 4), method = "quantile", nclass = 4,
+#            legend.values.rnd = 2, legend.pos = "topleft", 
+#            legend.title.txt = paste0("Moyenne de la distance euclidienne\nentre les communes ne fusionnant pas ensemble\n", result_variable[1]),
+#            legend.title.cex = 1, legend.values.cex = 0.8)
+# layoutLayer(title = "La moyenne de la distance euclidienne avec les communes ne fusionnant pas entre elles",
+#   #coltitle = "black", 
+#   sources = "Source : INSEE, 2024", scale = NULL, author = "Auteur : G. Bideau.", frame ="", col = NA)
+# plot(dep$geom, col = NA, lwd = 1, add = TRUE)
+
+# Carte différence des distances euclidiennes
+choroLayer(x = pr_carto , var = "Différence",
+           col = carto.pal(pal1 = "red.pal", n1 = 2, pal2 = "blue.pal", n2 = 2), method = "quantile", nclass = 4,
+           legend.values.rnd = 2, legend.pos = "topleft", 
+           legend.title.txt = paste0("Différence de distance euclidienne\n(communes avec lesquelles elle n'a pas fusionné\n- communes avec lesquelles elle a fusionné)\n", result_variable[1]),
+           legend.title.cex = 1, legend.values.cex = 0.8)
+layoutLayer(
+  # title = "Différence de distance euclidienne\n(communes avec lesquelles elle a fusionné\n- communes avec lesquelles elle a fusionné)",
+  #coltitle = "black", 
+  sources = "Source : INSEE, 2024", scale = NULL, author = "Auteur : G. Bideau.", frame ="", col = NA)
+plot(dep$geom, col = NA, lwd = 1, add = TRUE)
+
+
+
+assign(paste0("dist_eucl_", result_variable[1]), resultats)
+
+}
+```
+
+
+## Réalisation tableau
+
+```{r realisation tableau}
+colnames(tableau_synth) <- c("Variable(s) étudiée(s)", "Même commune nouvelle", "Voisine mais pas de fusion")
+tableau_synth[2:3] <- apply(tableau_synth[2:3], 2, as.numeric)
+tableau_synth$Différence <- tableau_synth$`Voisine mais pas de fusion` - tableau_synth$`Même commune nouvelle`
+kable(tableau_synth[c(2:4, 1)], digits=2)
+
+
+rm (com_etud, nbr_voisines, nbr_voisines_fus, nbr_voisines_Nfus, CODGEO_com, numvoisines, numcom)
+
+
+
+```
+
+
+Le tableau final permet d'observer la différence entre la distance statistique d'une commune avec ses voisines avec lesquelles elle n'a pas fusionné et celles avec lesquelles elle a fusionné. Cela signifie que quand cette différence est positive, la commune fusionnante est statistiquement plus proche des communes avec lesquelles elle a fusionné que des autres communes voisines avec lesquelles elle n'a pas fusionné. En revanche, quand la différence est négative, cela veut dire que la distance statistique entre communes ayant fusionné entre elles est plus importante que la distance statistique avec les communes voisines (et ce, que la différence soit positive ou négative d'ailleurs).
+
+La quasi totalité des différences sur les variables étant positives, on en conclu que les communes fusionnantes ont quand même tendance à fusionner plutôt avec des communes plus proches, donc davantage sur une logique homogène. La seule variable qui dénote est le taux d'actifs occupés hors de la commune de résidence, variable décidémment très particulière.
+
+
+## Réalisation boxplots
+
+
+On réalise ici une série de boxplots permettant d'observer si la distance statistique varie lorsqu'on discrétise en fonction du ZAU ou de l'appartenance régionale. Globalement, peu de différences, quelles que soient ces variables.
+
+
+```{r boxplot distance statistique voisines}
+variables_a_etudier <- liste_variables[9]
+variables_a_etudier <- liste_variables[2]
+
+for (variables_a_etudier in liste_variables_uniques_sans_polit) {# Pour une variable donnée
+  tableau <- get(paste0("dist_eucl_", variables_a_etudier)) # On sélectionne les données concernant la distance euclidienne
+  colnames(tableau)
+  
+  pr_graph <- melt(tableau[, c("CODGEO", 
+                           "Moyenne de la distance euclidienne avec les communes avec lesquelles la commune a fusionné",
+                           "Moyenne de la distance euclidienne avec les communes avec lesquelles la commune n'a pas fusionné")],
+               id.vars = "CODGEO")
+  
+  
+  pr_graph <- merge(pr_graph, df2011[, c("CODGEO", "CATAEU2010", "CODE_DEPT", "REG")], by = "CODGEO")
+  
+  labels_variable <- c("Communes avec lesquelles\nla commune a fusionné", "Communes avec lesquelles\nla commune n'a pas fusionné")
+  
+  boxplot <- ggplot(pr_graph, aes(x = CATAEU2010, y = value, color = variable)) +
+    geom_boxplot(varwidth = FALSE) +
+    # scale_color_manual(values=couleurs , labels = labels_COM_NOUV) +
+    ylab(paste0("Moyenne de la distance euclidienne\npour l'ensemble des communes fusionnantes")) +
+    xlab("Code ZAU") +
+    scale_color_manual(values = c("red", "blue"), labels = labels_variable) +
+    ggtitle(paste0("Comparaison des moyennes des distances statistiques\n", variables_a_etudier))
+  # print (boxplot)
+  
+  
+  # On modifie éventuellement le graphique pour le rendre plus lisible si valeurs extrêmes
+  pr_calculs <- c(tableau$`Moyenne de la distance euclidienne avec les communes avec lesquelles la commune a fusionné`, tableau$`Moyenne de la distance euclidienne avec les communes avec lesquelles la commune n'a pas fusionné`)
+  upper.limit <- quantile(pr_calculs, na.rm = TRUE)[4] + 20*IQR(pr_calculs, na.rm = TRUE)
+  lower.limit <- quantile(pr_calculs, na.rm = TRUE)[2] - 20*IQR(pr_calculs, na.rm = TRUE)
+
+    print(boxplot + coord_cartesian(ylim=c(0, upper.limit)))
+    
+  # Possibilité de vérifier la fiabilité des données avec le test de Kruskal-Wallis
+  ## https://www.datanovia.com/en/fr/lessons/test-de-kruskal-wallis-dans-r/
+  # res.kruskal <- pr_graph %>% kruskal_test(value ~ CATAEU2010)
+  # print(as.data.frame(res.kruskal))
+  
+  boxplot <- ggplot(pr_graph, aes(x = REG, y = value, color = variable)) +
+    geom_boxplot(varwidth = FALSE) +
+    # scale_color_manual(values=couleurs , labels = labels_COM_NOUV) +
+    ylab(paste0("Moyenne de la distance euclidienne\npour l'ensemble des communes fusionnantes")) +
+    xlab("Région") +
+    scale_color_manual(values = c("red", "blue"), labels = labels_variable) +
+    ggtitle(paste0("Comparaison des moyennes des distances statistiques\n", variables_a_etudier))
+  # print (boxplot)
+  print(boxplot + coord_cartesian(ylim=c(0, upper.limit)))
+
+   }
+
+
+```
+
+
+
+# Analyse en comparaison plus élevée/plus basse
+
+Pour observer si les voisines d'une commune fusionnante avec lesquelles elle fusionne sont plus ou moins favorisées que les voisines avec lesquelles elle ne fusionne pas, il est possible, de manière exploratoire, d'observer pour certaines variables si les unes ou les autres ont généralement des valeurs plus ou moins élevées.
+
+## Analyse
+
+```{r analyse_comparaison_plus_haut_plus_bas}
+# Si on part du package rgeoda
+queen_w <- queen_weights(test_geom, order=1, include_lower_order = FALSE, precision_threshold = 0)
+
+
+# On crée le vecteur qui va abriter les résultats pour l'ensemble des variables
+tableau_synth <- data.frame()
+
+variables_a_etudier <- liste_variables_uniques[9]
+
+for (variables_a_etudier in liste_variables_uniques) {
+
+
+test_data <- test_geom[, c("CODGEO", "CODGEO_new", "LIBGEO", "LIBGEO_new", "COM_NOUV", variables_a_etudier)]
+st_geometry(test_data) <- NULL
+
+test_data_Cfus <- subset(test_data, test_data$COM_NOUV == "OUI")
+
+resultats <- data.frame() # Pour accueillir les résultats
+CODGEO_com <- test_data_Cfus$CODGEO[10] # Pour tests
+
+for (CODGEO_com in test_data_Cfus$CODGEO) { # Pour chaque commune ayant fusionné
+  # On identifie la commune
+  numcom <- which(test_data$CODGEO==CODGEO_com)
+  CODGEO_new_com <- test_data$CODGEO_new[numcom]
+
+  # On liste les voisines, par l'identifiant de leur ligne
+  numvoisines <- get_neighbors(queen_w, idx = numcom)
+  # CODGEO_voisines <- test_data$CODGEO[numvoisines]
+  nbr_voisines <- length(numvoisines)
+  # num_voisine <- numvoisines[2]
+  # test_data$CODGEO[numvoisines]
+  # On sélectionne uniquement les communes limitrophes
+  test_data_subset <- test_data[numvoisines,]
+  # On renseigne, dans un nouveau champs, si ces communes appartiennent à la même commune nouvelle ou non
+  test_data_subset$lien <- ifelse(test_data_subset$CODGEO_new == CODGEO_new_com,# Si le CODGEO_new de la commune est le même que celui de la commune fusionnante qu'on étudie
+                                  "meme_CN", # Si oui, on indique que c'est la même commune
+                                  "pas_meme_CN" # Si non, on l'indique
+                                  )
+  
+  
+  # On crée des tableaux pour les communes fusionnant ensemble et pour les autres. Dans chaque cas, on fait la moyenne et on compte le nombre de communes
+  test_data_subset_meme_CN <- subset(test_data_subset, lien == "meme_CN")
+  nbr_voisines_fus <- nrow(test_data_subset_meme_CN) # On compte le nombre de voisines appartenant à la même CN
+  moy_comfus <- mean(test_data_subset_meme_CN[, variables_a_etudier])
+  
+  test_data_subset_pas_meme_CN <- subset(test_data_subset, lien == "pas_meme_CN")
+  nbr_voisines_Nfus <- nrow(test_data_subset_pas_meme_CN) # On compte le nombre d'autres voisines
+  moy_comNfus <- mean(test_data_subset_pas_meme_CN[, variables_a_etudier])
+  
+  # On calcule la différence. Si le résultat est positif, les communes noun fusionnantes sont mieux dotées, si le résultat est positif, les communes fusionnantes sont mieux dotées, si le résultat est proche de zéro (regarder l'ordre de grandeur avec les moyennes données), il y a peu de différence
+  difference_moy = moy_comNfus - moy_comfus
+  
+  # On sauvegarde les résultats
+  com_etud <- c(CODGEO_com, nbr_voisines, nbr_voisines_fus, nbr_voisines_Nfus, moy_comfus, moy_comNfus, difference_moy)
+  
+  resultats <- rbind(resultats, com_etud, stringsAsFactors = FALSE)
+} # Fin boucle pour une commune
+
+# NB : Pourrait valoir le coup de standardiser les données, mais à voir à quel moment...
+colnames(resultats) <- c("CODGEO", "Nombre de voisines", "Nombre de voisines avec lesquelles la commune a fusionné", "Nombre de voisines avec lesquelles la commune n'a pas fusionné", "Moyenne des communes avec lesquelles la commune a fusionné", "Moyenne des communes avec lesquelles la commune n'a pas fusionné", "Différence (Nfus - Cfus)")
+
+# assign(paste0("Compar_moy_", variable), results)
+
+
+# On passe les variables en numérique
+resultats[2:ncol(resultats)] <- apply(resultats[2:ncol(resultats)], 2, as.numeric)
+
+summary(resultats)
+
+result_variable <- c(paste(variables_a_etudier, collapse = "_"), mean(resultats[,5], na.rm = TRUE), mean(resultats[,6], na.rm = TRUE), median(resultats[,5], na.rm = TRUE), median(resultats[,6], na.rm = TRUE))
+
+tableau_synth <- rbind(tableau_synth, result_variable, stringsAsFactors = FALSE)
+
+
+pr_carto <- merge(geom2011, resultats, by = "CODGEO")
+pr_carto <- merge(pr_carto, df2011[, c("CODGEO", "REG")], by = "CODGEO")
+# pr_carto <- subset(pr_carto, REG == "23" | REG == "25"| REG == "53"| REG == "52") # Normandies, Bretagne, Pays-de-la-Loire
+pr_carto <- subset(pr_carto, REG == "23"| REG == "25") # Normandies
+
+
+
+choroLayer(x = pr_carto , var = "Différence (Nfus - Cfus)",
+           col = carto.pal(pal1 = "red.pal", n1 = 2, pal2 = "blue.pal", n2 = 2), method = "quantile", nclass = 4,
+           legend.values.rnd = 2, legend.pos = "topleft", 
+           legend.title.txt = paste0("Différence des moyennes\n(communes avec lesquelles elle n'a pas fusionné\n- communes avec lesquelles elle a fusionné)\n", result_variable[1]),
+           legend.title.cex = 1, legend.values.cex = 0.8)
+layoutLayer(
+  # title = "Différence de distance euclidienne\n(communes avec lesquelles elle a fusionné\n- communes avec lesquelles elle a fusionné)",
+  #coltitle = "black", 
+  sources = "Source : INSEE, 2024", scale = NULL, author = "Auteur : G. Bideau.", frame ="", col = NA)
+plot(dep$geom, col = NA, lwd = 1, add = TRUE)
+
+
+
+assign(paste0("dist_eucl_", result_variable[1]), resultats)
+
+}
+```
+
+## Résultats sous forme de tableau
+
+```{r analyse_comparaison_plus_haut_plus_bas_tableau}
+
+tableau_synth[2:5] <- apply(tableau_synth[2:5], 2, as.numeric)
+colnames(tableau_synth) <- c("Variable(s) étudiée(s)", "Moyenne même commune nouvelle", "Moyenne voisines mais pas de fusion", "Médiane même commune nouvelle", "Médiane voisines mais pas de fusion")
+tableau_synth$Différence_moyenne <- tableau_synth$`Moyenne voisines mais pas de fusion` - tableau_synth$`Moyenne même commune nouvelle`
+tableau_synth$Différence_médiane <- tableau_synth$`Médiane voisines mais pas de fusion` - tableau_synth$`Médiane même commune nouvelle`
+kable(tableau_synth[c(2:7, 1)], digits=2)
+kable(tableau_synth, digits=2)
+
+
+rm (com_etud, nbr_voisines, nbr_voisines_fus, nbr_voisines_Nfus, CODGEO_com, numvoisines, numcom)
+
+
+
+```
+
+
+En observant la différence entre les communes voisines d'une commune fusionnante, selon qu'elles ont fusionné avec ou non, on observe tout d'abord des différences très variables d'une commune à l'autre. Les moyennes ou médianes globales font apparaître peu de différence.
+
+Cela irait dans le sens de fusions qui ne se feraient pas pour se joindre systématiquement à des communes plus favorisées (ou moins d'ailleurs).
+
+## Discrétisation par boxplots
+
+
+
+On réalise ici une série de boxplots permettant d'observer si la distance statistique varie lorsqu'on discrétise en fonction du ZAU ou de l'appartenance régionale. Globalement, peu de différences, quelles que soient ces variables.
+
+
+```{r boxplot distance statistique voisines plus haut ou bas}
+variables_a_etudier <- liste_variables[9]
+variables_a_etudier <- liste_variables[5]
+
+for (variables_a_etudier in liste_variables_uniques) {# Pour une variable donnée
+  tableau <- get(paste0("dist_eucl_", variables_a_etudier)) # On sélectionne les données concernant la distance euclidienne
+  colnames(tableau)
+  
+  # On crée un tableau adapté pour les graphiques
+  pr_graph <- melt(tableau[, c("CODGEO", 
+                           "Moyenne des communes avec lesquelles la commune a fusionné",
+                           "Moyenne des communes avec lesquelles la commune n'a pas fusionné")],
+               id.vars = "CODGEO")
+  
+  
+  pr_graph <- merge(pr_graph, df2011[, c("CODGEO", "CATAEU2010", "CODE_DEPT", "REG")], by = "CODGEO")
+  
+  # labels_variable <- c("Communes avec lesquelles\nla commune a fusionné", "Communes avec lesquelles\nla commune n'a pas fusionné")
+  labels_variable <- c("Communes avec\nlesquelles la\ncommune a\nfusionné", "Communes avec\nlesquelles la\ncommune n'a\npas fusionné")
+  
+  boxplot <- ggplot(pr_graph, aes(x = CATAEU2010, y = value, color = variable)) +
+    geom_boxplot(varwidth = FALSE) + # Pour faire varier la taille en fonction des effectifs
+    # scale_color_manual(values=couleurs , labels = labels_COM_NOUV) +
+    ylab(paste0("Valeur moyenne")) +
+    xlab("Code ZAU") +
+    scale_color_manual(name = " ", values = c("red", "blue"), labels = labels_variable) +
+    ggtitle(paste0("Comparaison des moyennes\n", variables_a_etudier))
+  # print (boxplot)
+  
+  
+  
+  # On modifie éventuellement le graphique pour le rendre plus lisible si valeurs extrêmes
+  pr_calculs <- pr_graph$value
+  upper.limit <- quantile(pr_calculs, na.rm = TRUE)[4] + 4*IQR(pr_calculs, na.rm = TRUE)
+  lower.limit <- quantile(pr_calculs, na.rm = TRUE)[2] - 4*IQR(pr_calculs, na.rm = TRUE)
+
+    print(boxplot + coord_cartesian(ylim=c(0, upper.limit)))
+    # print(boxplot + coord_cartesian(ylim=c(0, 30000)) + ylab(paste0("Population moyenne")) + ggtitle(NULL) + scale_x_discrete(labels = CategZAU) +  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab(NULL)) # Pour graphique thèse
+    # print(boxplot + coord_cartesian(ylim=c(0, 80)) + ylab(paste0("Superficie moyenne")) + ggtitle(NULL) + scale_x_discrete(labels = CategZAU) +  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab(NULL)) # Pour graphique thèse
+
+  # Possibilité de vérifier la fiabilité des données avec le test de Kruskal-Wallis
+  ## https://www.datanovia.com/en/fr/lessons/test-de-kruskal-wallis-dans-r/
+  # res.kruskal <- pr_graph %>% kruskal_test(value ~ CATAEU2010)
+  # print(as.data.frame(res.kruskal))
+  
+  boxplot <- ggplot(pr_graph, aes(x = REG, y = value, color = variable)) +
+    geom_boxplot(varwidth = FALSE) + # Pour faire varier la taille en fonction des effectifs
+    # scale_color_manual(values=couleurs , labels = labels_COM_NOUV) +
+    ylab(paste0("Valeur moyenne")) +
+    xlab("Région") +
+    scale_color_manual(name = " ", values = c("red", "blue"), labels = labels_variable) +
+    ggtitle(paste0("Comparaison des moyennes\n", variables_a_etudier))
+  # print (boxplot)
+  print(boxplot + coord_cartesian(ylim=c(0, upper.limit)))
+
+   }
+
+
+```
+
+
+
+```{r Nettoyage espace de travail fin section 999, echo=FALSE}
+rm(list=ls())
+```
+
