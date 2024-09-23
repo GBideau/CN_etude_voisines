@@ -102,7 +102,7 @@ Licence CC-BY-NC-SA.
 Il est possible d'accéder au code de ce Markdown ici : https://gbideau.github.io/CN_etude_voisines/etude_voisines.Rmd
 
 Les données utilisées pour jouer le code sont regroupées ici :
-https://gbideau.github.io/CN_data/CN_data.zip
+https://gbideau.github.io/CN_data/
 
 Ne pas hésiter à contacter l'auteur (gabriel.bideau@gmail.com) pour toute question.
 
